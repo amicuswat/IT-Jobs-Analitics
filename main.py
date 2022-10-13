@@ -20,6 +20,9 @@ LANGUAGES = [
 HH_URL = "https://api.hh.ru/vacancies"
 SJ_URL = "https://api.superjob.ru/2.0/vacancies/"
 
+SJ_WHOLE_PERIOD = 0
+SJ_API_VACANCIES_LIMIT = 500
+
 
 def calculate_salary(min_salary, max_salary):
     if min_salary and max_salary:
@@ -30,23 +33,30 @@ def calculate_salary(min_salary, max_salary):
         return max_salary * 0.8
 
 
-def get_hh_data_for_lang(url, lang, page=1):
+def get_hh_vacanies_for_lang(url, lang, page=1):
+    cities = {
+        "Moscow": "1"
+    }
+
+    days = "1"
+
     params = {
         "text": f"программист {lang}",
-        "area": "1",
+        "area": cities['Moscow'],
         "page": page,
-        # "date_from": "2000-01-01",
-        "period": "3",
+        "period": days,
     }
 
     response = requests.get(url, params=params)
     response.raise_for_status()
 
-    return response.json()
+    vacancies = response.json()
+
+    return vacancies
 
 
-def print_result_in_table(data, title):
-    HEADINGS = [
+def print_result_in_table(salaries_analitycs, title):
+    column_names = [
         "Язык программирования",
         "Вакансий найдено",
         "Вакансий обработано",
@@ -54,15 +64,15 @@ def print_result_in_table(data, title):
     ]
 
     table_data = [
-        HEADINGS
+        column_names
     ]
 
-    for key in data:
+    for lang in salaries_analitycs:
         table_data.append([
-            key,
-            data[key]['vacancies_found'],
-            data[key]['vacancies_processed'],
-            data[key]['average_salary']
+            lang,
+            salaries_analitycs[lang]['vacancies_found'],
+            salaries_analitycs[lang]['vacancies_processed'],
+            salaries_analitycs[lang]['average_salary']
         ])
 
     table = AsciiTable(table_data)
@@ -71,37 +81,38 @@ def print_result_in_table(data, title):
 
 
 def predict_rub_hh_salary(vacancy):
-    if vacancy['salary']:
-        min_salary = vacancy['salary']['from']
-        max_salary = vacancy['salary']['to']
-        currency = vacancy['salary']['currency']
+    if (not vacancy['salary']
+        or vacancy['salary']['currency'] != "RUR"):
+        return
 
-        if currency == "RUR":
-            return calculate_salary(min_salary, max_salary)
+    min_salary = vacancy['salary']['from']
+    max_salary = vacancy['salary']['to']
+
+    return calculate_salary(min_salary, max_salary)
 
 
 def predict_rub_sj_salary(vacancy):
+    if vacancy['currency'] != "rub":
+        return
+
     min_salary = vacancy['payment_from']
     max_salary = vacancy['payment_to']
-    currency = vacancy['currency']
 
-    if currency == "rub":
-        return calculate_salary(min_salary, max_salary)
+    return calculate_salary(min_salary, max_salary)
 
 
-def get_hh_analytics_data():
-    langs_data = {}
+def analyse_hh_salaries():
+    avg_salaries_by_lang = {}
 
     for language in LANGUAGES:
 
-        _lang_data = get_hh_data_for_lang(HH_URL, language)
-
-        vacancies_num = _lang_data['found']
-        pages = _lang_data['pages']
+        vacancies = get_hh_vacanies_for_lang(HH_URL, language)
+        vacancies_found = vacancies['found']
+        pages = vacancies['pages']
 
         lang_vacancies = []
         for page in range(1, pages):
-            _vacancies = get_hh_data_for_lang(HH_URL, language, page)['items']
+            _vacancies = get_hh_vacanies_for_lang(HH_URL, language, page)['items']
             lang_vacancies.extend(_vacancies)
 
         salaries = []
@@ -111,39 +122,67 @@ def get_hh_analytics_data():
             if salary:
                 salaries.append(salary)
 
-        avg_salary = int(numpy.mean(salaries))
-        vacancies_studies = len(salaries)
+        if not salaries:
+            avg_salary = "No data"
+        else:
+            avg_salary = int(numpy.mean(salaries))
 
-        langs_data[language] = {
-            "vacancies_found": vacancies_num,
-            "vacancies_processed": vacancies_studies,
+        vacancies_processed = len(salaries)
+
+        avg_salaries_by_lang[language] = {
+            "vacancies_found": vacancies_found,
+            "vacancies_processed": vacancies_processed,
             "average_salary": avg_salary
         }
-    return langs_data
+    return avg_salaries_by_lang
 
 
-def get_sj_analytics_data():
-    load_dotenv()
-
-    auth_data = {
-        "X-Api-App-Id": os.environ['SJ_SECRET_KEY']
+def analyse_sj_salaries(sj_secret_key):
+    sj_secret_key = {
+        "X-Api-App-Id": sj_secret_key
     }
 
-    lang_data = {}
+    cities = {
+        "Moscow": 4
+    }
+
+    vacancies_per_page = 20
+    max_permited_pages = SJ_API_VACANCIES_LIMIT//vacancies_per_page
+
+    avg_salaries_by_lang = {}
 
     for language in LANGUAGES:
 
         params = {
-            "keyword": f"Программист {language}",
-            "town": 4,
-            "period": 0
+            "keyword": f"{language}",
+            "town": cities['Moscow'],
+            "period": SJ_WHOLE_PERIOD
         }
 
-        response = requests.get(SJ_URL, headers=auth_data, params=params)
+        response = requests.get(SJ_URL, headers=sj_secret_key, params=params)
         response.raise_for_status()
 
-        vacancies = response.json()['objects']
-        vacancies_num = response.json()['total']
+        vacancies_raw_data = response.json()
+
+        vacancies = vacancies_raw_data['objects']
+        vacancies_found = vacancies_raw_data['total']
+        pages = vacancies_raw_data['total']//vacancies_per_page
+
+        if pages > max_permited_pages:
+            pages = max_permited_pages
+
+        if pages:
+            vacancies = []
+            for page in range(pages):
+                params['page'] = page
+                response = requests.get(SJ_URL, headers=sj_secret_key,
+                                        params=params)
+                response.raise_for_status()
+
+                vacancies_raw_data = response.json()
+
+                _vacancies = vacancies_raw_data['objects']
+                vacancies.extend(_vacancies)
 
         salaries = []
         for vacancy in vacancies:
@@ -153,23 +192,27 @@ def get_sj_analytics_data():
                 salaries.append(salary)
 
         avg_salary = int(numpy.mean(salaries))
-        vacancies_studies = len(salaries)
+        vacancies_processed = len(salaries)
 
-        lang_data[language] = {
-            "vacancies_found": vacancies_num,
-            "vacancies_processed": vacancies_studies,
+        avg_salaries_by_lang[language] = {
+            "vacancies_found": vacancies_found,
+            "vacancies_processed": vacancies_processed,
             "average_salary": avg_salary
         }
 
-    return lang_data
+    return avg_salaries_by_lang
 
 
 def main():
-    sj_data = get_sj_analytics_data()
-    hh_data = get_hh_analytics_data()
+    load_dotenv()
 
-    print_result_in_table(sj_data, "SuperJob Moscow")
-    print_result_in_table(hh_data, "HeadHunter Moscow")
+    sj_secret_key = os.environ['SJ_SECRET_KEY']
+
+    sj_salaries = analyse_sj_salaries(sj_secret_key)
+    hh_salaries = analyse_hh_salaries()
+
+    print_result_in_table(sj_salaries, "SuperJob Moscow")
+    print_result_in_table(hh_salaries, "HeadHunter Moscow")
 
 
 if __name__ == "__main__":
