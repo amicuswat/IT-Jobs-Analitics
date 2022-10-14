@@ -63,19 +63,19 @@ def print_result_in_table(salaries_analitycs, title):
         "Средняя зарплата"
     ]
 
-    table_data = [
+    salaries_analytics_table = [
         column_names
     ]
 
     for lang in salaries_analitycs:
-        table_data.append([
+        salaries_analytics_table.append([
             lang,
             salaries_analitycs[lang]['vacancies_found'],
             salaries_analitycs[lang]['vacancies_processed'],
             salaries_analitycs[lang]['average_salary']
         ])
 
-    table = AsciiTable(table_data)
+    table = AsciiTable(salaries_analytics_table)
     table.title = title
     print(table.table)
 
@@ -162,11 +162,11 @@ def analyse_sj_salaries(sj_secret_key):
         response = requests.get(SJ_URL, headers=sj_secret_key, params=params)
         response.raise_for_status()
 
-        vacancies_raw_data = response.json()
+        vacancies_unprocessed = response.json()
 
-        vacancies = vacancies_raw_data['objects']
-        vacancies_found = vacancies_raw_data['total']
-        pages = vacancies_raw_data['total']//vacancies_per_page
+        vacancies = vacancies_unprocessed['objects']
+        vacancies_found = vacancies_unprocessed['total']
+        pages = vacancies_unprocessed['total']//vacancies_per_page
 
         if pages > max_permited_pages:
             pages = max_permited_pages
@@ -179,9 +179,9 @@ def analyse_sj_salaries(sj_secret_key):
                                         params=params)
                 response.raise_for_status()
 
-                vacancies_raw_data = response.json()
+                vacancies_unprocessed = response.json()
 
-                _vacancies = vacancies_raw_data['objects']
+                _vacancies = vacancies_unprocessed['objects']
                 vacancies.extend(_vacancies)
 
         salaries = []
