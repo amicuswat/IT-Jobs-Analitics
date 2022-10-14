@@ -23,6 +23,9 @@ SJ_URL = "https://api.superjob.ru/2.0/vacancies/"
 SJ_WHOLE_PERIOD = 0
 SJ_API_VACANCIES_LIMIT = 500
 
+SJ_SECOND_PAGE_NUM = 1
+HH_SECONG_PAGE_NUM = 2
+
 
 def calculate_salary(min_salary, max_salary):
     if min_salary and max_salary:
@@ -106,18 +109,19 @@ def analyse_hh_salaries():
 
     for language in LANGUAGES:
 
-        vacancies = get_hh_vacanies_for_lang(HH_URL, language)
-        vacancies_found = vacancies['found']
-        pages = vacancies['pages']
+        vacancies_unprocessed = get_hh_vacanies_for_lang(HH_URL, language)
+        vacancies = vacancies_unprocessed['items']
+        vacancies_found = vacancies_unprocessed['found']
+        pages = vacancies_unprocessed['pages']
 
-        lang_vacancies = []
-        for page in range(1, pages):
-            _vacancies = get_hh_vacanies_for_lang(HH_URL, language, page)['items']
-            lang_vacancies.extend(_vacancies)
+        for page in range(HH_SECONG_PAGE_NUM, pages):
+            vacancies_unprocessed = get_hh_vacanies_for_lang(HH_URL,
+                                                  language,
+                                                  page)
+            vacancies.extend(vacancies_unprocessed['items'])
 
         salaries = []
-        for vacancy in lang_vacancies:
-
+        for vacancy in vacancies:
             salary = predict_rub_hh_salary(vacancy)
             if salary:
                 salaries.append(salary)
@@ -154,7 +158,7 @@ def analyse_sj_salaries(sj_secret_key):
     for language in LANGUAGES:
 
         params = {
-            "keyword": f"{language}",
+            "keyword": f"программист {language}",
             "town": cities['Moscow'],
             "period": SJ_WHOLE_PERIOD
         }
@@ -171,18 +175,16 @@ def analyse_sj_salaries(sj_secret_key):
         if pages > max_permited_pages:
             pages = max_permited_pages
 
-        if pages:
-            vacancies = []
-            for page in range(pages):
-                params['page'] = page
-                response = requests.get(SJ_URL, headers=sj_secret_key,
-                                        params=params)
-                response.raise_for_status()
+        for page in range(SJ_SECOND_PAGE_NUM, pages):
+            params['page'] = page
+            response = requests.get(SJ_URL, headers=sj_secret_key,
+                                    params=params)
+            response.raise_for_status()
 
-                vacancies_unprocessed = response.json()
+            vacancies_unprocessed = response.json()
 
-                _vacancies = vacancies_unprocessed['objects']
-                vacancies.extend(_vacancies)
+            _vacancies = vacancies_unprocessed['objects']
+            vacancies.extend(_vacancies)
 
         salaries = []
         for vacancy in vacancies:
